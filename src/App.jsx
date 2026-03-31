@@ -3,7 +3,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, deleteDoc, setDoc } from 'firebase/firestore';
 
-// --- Icon Components (lucide-react 의존성 에러 해결을 위해 내장 SVG로 완전 교체) ---
+// --- Icon Components (내장 SVG로 완전 교체) ---
 const Icon = ({ name, size = 24, className = '', strokeWidth = 2 }) => {
   const paths = {
     Check: <polyline points="20 6 9 17 4 12" />,
@@ -29,7 +29,6 @@ const Icon = ({ name, size = 24, className = '', strokeWidth = 2 }) => {
   );
 };
 
-// 사용할 아이콘들을 컴포넌트화
 const Check = (p) => <Icon name="Check" {...p}/>;
 const ChevronLeft = (p) => <Icon name="ChevronLeft" {...p}/>;
 const Minus = (p) => <Icon name="Minus" {...p}/>;
@@ -60,7 +59,6 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// DB Collection Paths
 const getEquipmentsRef = () => collection(db, 'equipments');
 const getTransactionsRef = () => collection(db, 'transactions');
 
@@ -98,7 +96,18 @@ export default function App() {
   const [newPwdInput, setNewPwdInput] = useState('');
   const [confirmPwdInput, setConfirmPwdInput] = useState('');
 
-  // Tailwind CSS CDN
+  // Custom Modal States (alert, confirm 대체)
+  const [alertState, setAlertState] = useState({ show: false, message: '' });
+  const [confirmState, setConfirmState] = useState({ show: false, message: '', onConfirm: null });
+  const [toastMsg, setToastMsg] = useState(''); // Toast 메시지 상태 추가
+
+  const showAlert = (message) => setAlertState({ show: true, message });
+  const showConfirm = (message, onConfirm) => setConfirmState({ show: true, message, onConfirm });
+  const showToast = (message) => {
+    setToastMsg(message);
+    setTimeout(() => setToastMsg(''), 2500);
+  };
+
   useEffect(() => {
     if (!document.getElementById('tailwind-cdn')) {
       const script = document.createElement('script');
@@ -149,7 +158,6 @@ export default function App() {
         (snapshot) => {
           const eqData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
           setEquipments(eqData);
-
           if (eqData.length === 0 && snapshot.metadata.fromCache === false) {
             seedInitialEquipments();
           }
@@ -215,7 +223,6 @@ export default function App() {
     return eq.totalQuantity - borrowedCount;
   };
 
-  // --- Image Handling Helpers ---
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -268,7 +275,7 @@ export default function App() {
     if (borrowerType === 'select') {
       finalBorrowerName = `${borrowerGrade}학년 ${borrowerClass}반`;
     } else {
-      if (!borrowerManual.trim()) return alert('이름을 입력해주세요.');
+      if (!borrowerManual.trim()) return showAlert('이름을 입력해주세요.');
       finalBorrowerName = borrowerManual.trim();
     }
 
@@ -294,7 +301,7 @@ export default function App() {
       showSuccess('대여가 완료되었습니다!');
     } catch (error) {
       console.error("Borrow error:", error);
-      alert('대여 처리 중 오류가 발생했습니다.');
+      showAlert('대여 처리 중 오류가 발생했습니다.');
     } finally {
       setLoading(false);
     }
@@ -317,7 +324,7 @@ export default function App() {
       showSuccess('반납이 완료되었습니다!');
     } catch (error) {
       console.error("Return error:", error);
-      alert('반납 처리 중 오류가 발생했습니다.');
+      showAlert('반납 처리 중 오류가 발생했습니다.');
     } finally {
       setLoading(false);
     }
@@ -336,21 +343,60 @@ export default function App() {
       setNewEqName('');
       setNewEqImage('');
       setNewEqQty(1);
-      showSuccess('새 물품이 추가되었습니다!');
+      showToast('새 물품이 추가되었습니다!'); // showSuccess -> showToast로 변경
     } catch (error) {
       console.error("Add equipment error:", error);
+      showAlert('물품 추가 중 오류가 발생했습니다.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDeleteEquipment = async (id) => {
+  // 물품 삭제 함수 - 삭제 전 확인(confirm) 창 추가!
+  const handleDeleteEquipment = (id) => {
+    showConfirm('정말 이 물품을 삭제하시겠습니까? 관련 대여 기록에서 물품 정보가 표시되지 않을 수 있습니다.', async () => {
+      try {
+        setLoading(true);
+        await deleteDoc(doc(db, 'equipments', id));
+        showToast('물품이 삭제되었습니다.'); // showSuccess -> showToast로 변경
+      } catch (error) {
+        console.error("Delete error:", error);
+        showAlert('물품 삭제 중 오류가 발생했습니다.');
+      } finally {
+        setLoading(false);
+      }
+    });
+  };
+
+  // --- 대여 기록 삭제 함수 추가 ---
+  const handleDeleteTransaction = (id) => {
+    showConfirm('이 대여/반납 기록을 정말 삭제하시겠습니까? 삭제된 기록은 복구할 수 없습니다.', async () => {
+      try {
+        setLoading(true);
+        await deleteDoc(doc(db, 'transactions', id));
+        showToast('기록이 삭제되었습니다.');
+      } catch (error) {
+        console.error("Delete transaction error:", error);
+        showAlert('기록 삭제 중 오류가 발생했습니다.');
+      } finally {
+        setLoading(false);
+      }
+    });
+  };
+
+  const handleChangePassword = async () => {
+    if (!newPwdInput) return showAlert('새 비밀번호를 입력해주세요.');
+    if (newPwdInput !== confirmPwdInput) return showAlert('비밀번호가 일치하지 않습니다.');
+
     try {
       setLoading(true);
-      await deleteDoc(doc(db, 'equipments', id));
-      showSuccess('물품이 삭제되었습니다.');
+      await setDoc(doc(db, 'config', 'admin'), { password: newPwdInput }, { merge: true });
+      showToast('비밀번호가 변경되었습니다!'); // showSuccess -> showToast로 변경
+      setNewPwdInput('');
+      setConfirmPwdInput('');
     } catch (error) {
-      console.error("Delete error:", error);
+      console.error("Password change error:", error);
+      showAlert('비밀번호 변경 중 오류가 발생했습니다.');
     } finally {
       setLoading(false);
     }
@@ -360,7 +406,7 @@ export default function App() {
     setSuccessMessage(msg);
     setView('success');
     setTimeout(() => {
-      setView('home');
+      setView(view.startsWith('admin') ? 'admin_home' : 'home');
       setSuccessMessage('');
     }, 2000);
   };
@@ -441,7 +487,6 @@ export default function App() {
               </button>
             </div>
 
-            {/* Admin Button */}
             <button
               onClick={() => setView('admin_auth')}
               className="absolute top-6 right-6 p-3 text-gray-400 hover:text-gray-700 bg-white rounded-full shadow-sm transition-all md:w-14 md:h-14 flex items-center justify-center"
@@ -472,7 +517,7 @@ export default function App() {
                       setView('admin_home');
                       setAdminPwdInput('');
                     } else {
-                      alert('비밀번호가 일치하지 않습니다.');
+                      showAlert('비밀번호가 일치하지 않습니다.');
                     }
                   }
                 }}
@@ -485,7 +530,7 @@ export default function App() {
                     setView('admin_home');
                     setAdminPwdInput('');
                   } else {
-                    alert('비밀번호가 일치하지 않습니다.');
+                    showAlert('비밀번호가 일치하지 않습니다.');
                   }
                 }}
                 className="w-full bg-gray-800 text-white font-bold text-lg py-4 rounded-xl shadow-lg transition-colors hover:bg-gray-900 active:scale-95"
@@ -688,7 +733,12 @@ export default function App() {
               <ul className="space-y-2 text-sm md:text-base text-green-700">
                 {Object.entries(selectedItems).map(([eqId, qty]) => {
                   const eq = equipments.find(e => e.id === eqId);
-                  return <li key={eqId} className="flex items-center"><span className="w-2 h-2 rounded-full bg-green-400 mr-2"></span> {eq?.name} <span className="font-bold ml-2">{qty}개</span></li>;
+                  return (
+                    <li key={eqId} className="flex justify-between items-center bg-white/60 p-2 rounded-lg">
+                      <span className="font-medium">{eq?.name}</span>
+                      <span className="font-bold bg-green-100 px-3 py-1 rounded-full">{qty}개</span>
+                    </li>
+                  );
                 })}
               </ul>
             </div>
@@ -697,9 +747,9 @@ export default function App() {
               <button
                 onClick={handleBorrowSubmit}
                 disabled={loading}
-                className="w-full bg-green-500 disabled:bg-green-400 text-white font-bold text-lg py-4 rounded-xl shadow-lg transition-transform active:scale-95 flex justify-center items-center"
+                className="w-full bg-green-500 disabled:bg-gray-400 text-white font-bold text-lg py-4 rounded-xl shadow-lg transition-colors"
               >
-                {loading ? '처리 중...' : '대여 완료하기'}
+                {loading ? '처리중...' : '대여 완료하기'}
               </button>
             </div>
           </div>
@@ -707,23 +757,23 @@ export default function App() {
 
         {/* --- RETURN VIEW --- */}
         {view === 'return_select' && (
-          <div className="p-4 md:p-6">
-            <p className="text-sm md:text-base font-medium text-gray-500 mb-4 px-1">현재 대여 중인 항목입니다. 반납할 항목을 선택하세요.</p>
+          <div className="p-4 md:p-6 space-y-4">
+            <p className="text-sm md:text-base font-medium text-gray-500 mb-4 px-1">내가 빌린 물품을 선택해서 반납하세요</p>
 
             {activeTransactions.length === 0 ? (
-              <div className="text-center py-20 bg-white rounded-3xl border border-gray-100 shadow-sm mt-4">
-                <div className="bg-gray-50 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6">
-                  <Check size={48} className="text-gray-300" />
+              <div className="text-center py-20 bg-white rounded-3xl border border-gray-100 shadow-sm">
+                <div className="bg-gray-50 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <CheckCircle2 size={48} className="text-gray-300" />
                 </div>
-                <h3 className="text-2xl font-bold text-gray-800">모두 반납됨</h3>
-                <p className="text-gray-500 mt-2 md:text-lg">현재 대여 중인 물품이 없습니다.</p>
+                <h3 className="text-xl font-bold text-gray-600 mb-2">대여 중인 물품이 없습니다</h3>
+                <p className="text-gray-400">모든 물품이 잘 반납되어 있습니다.</p>
               </div>
             ) : (
-              <div className="space-y-4 grid grid-cols-1 md:grid-cols-2 gap-4 md:space-y-0">
+              <div className="space-y-3 md:space-y-4">
                 {activeTransactions.map((tx) => {
                   const eq = equipments.find(e => e.id === tx.equipmentId);
                   const isSelected = selectedTransactions.includes(tx.id);
-                  const dateStr = tx.timestamp?.toDate ? new Intl.DateTimeFormat('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(tx.timestamp.toDate()) : '';
+                  const borrowDate = tx.timestamp ? new Date(tx.timestamp.toDate()).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '방금 전';
 
                   return (
                     <button
@@ -731,33 +781,31 @@ export default function App() {
                       onClick={() => {
                         setSelectedTransactions(prev =>
                           prev.includes(tx.id) ? prev.filter(id => id !== tx.id) : [...prev, tx.id]
-                        );
+                        )
                       }}
-                      className={`w-full text-left p-4 md:p-6 rounded-2xl border-2 flex items-center transition-all ${
-                        isSelected
-                          ? 'bg-red-50 border-red-500 shadow-md'
-                          : 'bg-white border-gray-100 shadow-sm hover:border-red-200'
+                      className={`w-full flex items-center p-4 md:p-5 rounded-2xl border-2 transition-all text-left ${
+                        isSelected ? 'bg-red-50 border-red-500 shadow-md' : 'bg-white border-gray-100 shadow-sm hover:border-red-200'
                       }`}
                     >
-                      <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center mr-4 shrink-0 transition-colors ${
-                        isSelected ? 'bg-red-500 border-red-500' : 'border-gray-300'
+                      <div className={`w-6 h-6 rounded-full border-2 mr-4 flex items-center justify-center shrink-0 transition-colors ${
+                        isSelected ? 'border-red-500 bg-red-500' : 'border-gray-300'
                       }`}>
-                        {isSelected && <Check size={18} className="text-white" strokeWidth={3} />}
+                        {isSelected && <Check size={14} className="text-white" strokeWidth={3} />}
                       </div>
 
-                      <div className="w-20 h-20 md:w-24 md:h-24 mr-4 bg-gray-50 p-2 rounded-xl shrink-0 flex items-center justify-center text-5xl md:text-6xl">
+                      <div className="w-12 h-12 md:w-16 md:h-16 flex items-center justify-center text-3xl md:text-4xl mr-4 shrink-0 bg-gray-50 rounded-xl">
                         {renderIcon(eq?.imageUrl, eq?.name)}
                       </div>
 
-                      <div className="flex-1 min-w-0">
-                        <div className="flex justify-between items-start mb-2">
-                          <h3 className="font-bold text-lg md:text-xl text-gray-800 truncate">{eq?.name || '알 수 없는 물품'} <span className="text-red-500 ml-1">{tx.borrowedQuantity}개</span></h3>
+                      <div className="flex-1">
+                        <div className="flex justify-between items-start mb-1">
+                          <h4 className="font-bold text-lg text-gray-800">{eq?.name || '알 수 없는 물품'}</h4>
+                          <span className="font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded text-sm">{tx.borrowedQuantity}개</span>
                         </div>
-                        <div className="flex items-center text-sm md:text-base text-gray-500 space-x-2">
-                          <span className="flex items-center"><User size={14} className="mr-1" /> {tx.borrowerName}</span>
-                          <span>•</span>
-                          <span>{dateStr}</span>
+                        <div className="flex items-center text-sm text-gray-500">
+                          <User size={14} className="mr-1" /> {tx.borrowerName}
                         </div>
+                        <div className="text-xs text-gray-400 mt-1">{borrowDate} 대여함</div>
                       </div>
                     </button>
                   );
@@ -770,206 +818,359 @@ export default function App() {
                 <button
                   disabled={selectedTransactions.length === 0 || loading}
                   onClick={handleReturnSubmit}
-                  className="w-full bg-red-500 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold text-lg py-4 rounded-xl shadow-lg transition-transform active:scale-95 flex justify-center items-center"
+                  className="w-full bg-red-500 disabled:bg-gray-300 text-white font-bold text-lg py-4 rounded-xl shadow-lg transition-colors"
                 >
-                  {loading ? '처리 중...' : `선택한 ${selectedTransactions.length}건 반납 완료`}
+                  {loading ? '처리중...' : `${selectedTransactions.length}개 반납하기`}
                 </button>
               </div>
             )}
           </div>
         )}
 
-        {/* --- ADMIN HOME --- */}
+        {/* --- SUCCESS VIEW --- */}
+        {view === 'success' && (
+          <div className="flex h-screen flex-col items-center justify-center p-6 bg-green-500 animate-in fade-in duration-500">
+            <div className="bg-white rounded-full p-6 mb-6 shadow-2xl animate-bounce">
+              <Check size={80} className="text-green-500" strokeWidth={3} />
+            </div>
+            <h2 className="text-3xl font-bold text-white mb-2">{successMessage}</h2>
+            <p className="text-green-100">잠시 후 메인 화면으로 이동합니다...</p>
+          </div>
+        )}
+
+        {/* --- ADMIN HOME VIEW --- */}
         {view === 'admin_home' && (
-          <div className="p-4 md:p-6 space-y-4 mt-4 grid grid-cols-1 md:grid-cols-2 md:gap-6 md:space-y-0">
+          <div className="p-4 md:p-6 space-y-4">
+            <h2 className="text-2xl font-bold text-gray-800 mb-6">관리자 메뉴</h2>
+
             <button
               onClick={() => setView('admin_equipments')}
-              className="w-full bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-gray-100 flex items-center space-x-4 hover:border-gray-300 transition-all"
+              className="w-full bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between hover:border-green-300 transition-colors group"
             >
-              <div className="bg-blue-100 p-4 rounded-full text-blue-600"><Package size={32} /></div>
-              <div className="text-left">
-                <h3 className="text-xl md:text-2xl font-bold text-gray-800">물품 마스터 관리</h3>
-                <p className="text-sm md:text-base text-gray-500 mt-1">새로운 교구 추가 및 기존 물품 삭제</p>
+              <div className="flex items-center">
+                <div className="bg-green-100 p-3 rounded-xl mr-4 group-hover:scale-110 transition-transform">
+                  <Package size={28} className="text-green-600" />
+                </div>
+                <div className="text-left">
+                  <h3 className="text-lg font-bold text-gray-800">물품 마스터 관리</h3>
+                  <p className="text-sm text-gray-500">새 물품 추가, 수량 수정, 이미지 등록</p>
+                </div>
               </div>
+              <ChevronLeft className="text-gray-400 rotate-180" />
             </button>
 
             <button
               onClick={() => setView('admin_history')}
-              className="w-full bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-gray-100 flex items-center space-x-4 hover:border-gray-300 transition-all"
+              className="w-full bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between hover:border-blue-300 transition-colors group"
             >
-              <div className="bg-purple-100 p-4 rounded-full text-purple-600"><List size={32} /></div>
-              <div className="text-left">
-                <h3 className="text-xl md:text-2xl font-bold text-gray-800">전체 대여 기록</h3>
-                <p className="text-sm md:text-base text-gray-500 mt-1">모든 대여 및 반납 히스토리 조회</p>
+              <div className="flex items-center">
+                <div className="bg-blue-100 p-3 rounded-xl mr-4 group-hover:scale-110 transition-transform">
+                  <List size={28} className="text-blue-600" />
+                </div>
+                <div className="text-left">
+                  <h3 className="text-lg font-bold text-gray-800">전체 대여 기록</h3>
+                  <p className="text-sm text-gray-500">누가 언제 무엇을 빌렸는지 확인</p>
+                </div>
               </div>
+              <ChevronLeft className="text-gray-400 rotate-180" />
             </button>
 
             <button
               onClick={() => setView('admin_settings')}
-              className="w-full bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-gray-100 flex items-center space-x-4 hover:border-gray-300 transition-all md:col-span-2"
+              className="w-full bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between hover:border-gray-400 transition-colors group"
             >
-              <div className="bg-gray-100 p-4 rounded-full text-gray-600"><Lock size={32} /></div>
-              <div className="text-left">
-                <h3 className="text-xl md:text-2xl font-bold text-gray-800">관리자 설정</h3>
-                <p className="text-sm md:text-base text-gray-500 mt-1">관리자 비밀번호 변경</p>
+              <div className="flex items-center">
+                <div className="bg-gray-100 p-3 rounded-xl mr-4 group-hover:scale-110 transition-transform">
+                  <Lock size={28} className="text-gray-600" />
+                </div>
+                <div className="text-left">
+                  <h3 className="text-lg font-bold text-gray-800">관리자 설정</h3>
+                  <p className="text-sm text-gray-500">관리자 비밀번호 변경</p>
+                </div>
               </div>
+              <ChevronLeft className="text-gray-400 rotate-180" />
             </button>
           </div>
         )}
 
-        {/* --- ADMIN SETTINGS --- */}
-        {view === 'admin_settings' && (
-          <div className="p-4 md:p-6 space-y-6">
-            <div className="bg-white p-5 md:p-8 rounded-2xl shadow-sm border border-gray-100 max-w-md mx-auto">
-              <h3 className="font-bold text-gray-800 mb-6 flex items-center text-lg md:text-xl">
-                <Lock size={22} className="mr-2 text-gray-600"/> 관리자 비밀번호 변경
+        {/* --- ADMIN EQUIPMENTS VIEW --- */}
+        {view === 'admin_equipments' && (
+          <div className="p-4 md:p-6 space-y-8">
+            {/* 새 물품 추가 폼 (위로 이동됨) */}
+            <div className="bg-white p-5 md:p-6 rounded-2xl border border-gray-100 shadow-sm">
+              <h3 className="text-lg font-bold text-gray-800 mb-6 flex items-center">
+                <PlusCircle size={20} className="mr-2 text-green-500" /> 새 물품 추가하기
               </h3>
 
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-bold text-gray-500 mb-2">새 비밀번호</label>
+                  <label className="block text-sm font-bold text-gray-600 mb-1">물품 이름</label>
+                  <input
+                    type="text"
+                    value={newEqName}
+                    onChange={(e) => setNewEqName(e.target.value)}
+                    placeholder="예: 탁구채"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 focus:ring-2 focus:ring-green-500 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-gray-600 mb-1">사진 / 아이콘</label>
+                  <div className="flex gap-3">
+                    <div className="flex-1 relative">
+                      <input
+                        type="text"
+                        value={newEqImage}
+                        onChange={(e) => setNewEqImage(e.target.value)}
+                        placeholder="이모지 입력 또는 사진 선택"
+                        className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 focus:ring-2 focus:ring-green-500 outline-none"
+                      />
+                    </div>
+                    <label className="cursor-pointer bg-gray-100 hover:bg-gray-200 text-gray-700 flex items-center justify-center px-4 rounded-lg font-medium transition-colors border border-gray-200">
+                      <Camera size={20} className="mr-2" /> 사진업로드
+                      <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
+                    </label>
+                  </div>
+
+                  {/* 빠른 이모지 선택 UI 추가 */}
+                  <div className="mt-2">
+                    <p className="text-xs text-gray-500 mb-2">빠른 이모지 (직접 입력: 윈도우키 + 마침표(.) / 맥: Cmd+Ctrl+Space)</p>
+                    <div className="flex flex-wrap gap-2">
+                      {['🏀', '⚽', '🏐', '⚾', '🎾', '🏸', '🏓', '🤸', '🎽', '➰', '🥊', '📦'].map(emoji => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          onClick={() => setNewEqImage(emoji)}
+                          className="w-10 h-10 flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded-lg text-2xl transition-colors border border-gray-200"
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {newEqImage && newEqImage.startsWith('data:image') && (
+                    <div className="mt-2 w-16 h-16 rounded-lg border overflow-hidden">
+                      <img src={newEqImage} alt="preview" className="w-full h-full object-cover" />
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex gap-4">
+                  <div className="flex-1">
+                    <label className="block text-sm font-bold text-gray-600 mb-1">총 수량</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={newEqQty}
+                      onChange={(e) => setNewEqQty(e.target.value)}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 focus:ring-2 focus:ring-green-500 outline-none"
+                    />
+                  </div>
+                  <div className="flex-1 flex items-end pb-2">
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={newEqTracked}
+                        onChange={(e) => setNewEqTracked(e.target.checked)}
+                        className="w-5 h-5 rounded text-green-500 focus:ring-green-500"
+                      />
+                      <span className="text-sm font-bold text-gray-600">수량 관리 필요</span>
+                    </label>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleAddEquipment}
+                  className="w-full bg-gray-800 hover:bg-gray-900 text-white font-bold py-3 rounded-xl mt-4 transition-colors"
+                >
+                  목록에 추가하기
+                </button>
+              </div>
+            </div>
+
+            <hr className="border-gray-200" />
+
+            {/* 등록된 물품 목록 (아래로 이동됨) */}
+            <div>
+              <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center">
+                <Package size={20} className="mr-2" /> 등록된 물품 목록
+              </h3>
+              <div className="space-y-3">
+                {equipments.map(eq => (
+                  <div key={eq.id} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex items-center justify-between">
+                    <div className="flex items-center">
+                      <div className="w-12 h-12 flex items-center justify-center text-3xl bg-gray-50 rounded-lg mr-4 overflow-hidden">
+                        {renderIcon(eq.imageUrl, eq.name)}
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-gray-800">{eq.name}</h4>
+                        <p className="text-xs text-gray-500 mt-1">총 수량: {eq.totalQuantity}개 {eq.isQuantityTracked ? '(수량관리O)' : '(수량관리X)'}</p>
+                      </div>
+                    </div>
+                    {/* 삭제 버튼 연결 부분 */}
+                    <button
+                      onClick={() => handleDeleteEquipment(eq.id)}
+                      className="text-red-400 hover:text-red-600 hover:bg-red-50 p-2 rounded-lg transition-colors"
+                      title="삭제하기"
+                    >
+                      <Trash2 size={20} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* --- ADMIN HISTORY VIEW --- */}
+        {view === 'admin_history' && (
+          <div className="p-4 md:p-6 space-y-4">
+            <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center">
+              <History size={20} className="mr-2" /> 전체 대여/반납 기록
+            </h3>
+
+            <div className="space-y-3">
+              {[...transactions]
+                .sort((a, b) => b.timestamp - a.timestamp)
+                .map(tx => {
+                  const eq = equipments.find(e => e.id === tx.equipmentId);
+                  const isReturned = tx.status === 'returned';
+                  const dateStr = tx.timestamp ? new Date(tx.timestamp.toDate()).toLocaleString('ko-KR') : '-';
+                  const returnStr = tx.returnTimestamp ? new Date(tx.returnTimestamp.toDate()).toLocaleString('ko-KR') : '-';
+
+                  return (
+                    <div key={tx.id} className={`p-4 rounded-xl border ${isReturned ? 'bg-gray-50 border-gray-200' : 'bg-white border-green-200 shadow-sm'}`}>
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="font-bold text-gray-800">
+                          {eq?.name || '삭제된 물품'} <span className="text-sm font-normal text-gray-500 ml-1">x {tx.borrowedQuantity}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs font-bold px-2 py-1 rounded ${isReturned ? 'bg-gray-200 text-gray-600' : 'bg-green-100 text-green-700'}`}>
+                            {isReturned ? '반납완료' : '대여중'}
+                          </span>
+                          <button
+                            onClick={() => handleDeleteTransaction(tx.id)}
+                            className="text-gray-400 hover:text-red-500 transition-colors p-1 rounded-md hover:bg-red-50"
+                            title="기록 삭제"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="text-sm text-gray-600 mb-1">
+                        <span className="font-medium">대여자:</span> {tx.borrowerName}
+                      </div>
+                      <div className="text-xs text-gray-400">
+                        대여일: {dateStr}
+                        {isReturned && <><br/>반납일: {returnStr}</>}
+                      </div>
+                    </div>
+                  );
+              })}
+              {transactions.length === 0 && (
+                 <div className="text-center py-10 text-gray-500 bg-white rounded-xl border border-gray-100">
+                    기록이 없습니다.
+                 </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* --- ADMIN SETTINGS VIEW --- */}
+        {view === 'admin_settings' && (
+          <div className="p-4 md:p-6">
+            <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+              <h3 className="text-lg font-bold text-gray-800 mb-6 flex items-center">
+                <Lock size={20} className="mr-2" /> 관리자 비밀번호 변경
+              </h3>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-gray-600 mb-1">새 비밀번호</label>
                   <input
                     type="password"
                     value={newPwdInput}
                     onChange={(e) => setNewPwdInput(e.target.value)}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl p-4 text-lg font-bold outline-none focus:ring-2 focus:ring-gray-500"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 focus:ring-2 focus:ring-green-500 outline-none"
                     placeholder="새 비밀번호 입력"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-500 mb-2">새 비밀번호 확인</label>
+                  <label className="block text-sm font-bold text-gray-600 mb-1">비밀번호 확인</label>
                   <input
                     type="password"
                     value={confirmPwdInput}
                     onChange={(e) => setConfirmPwdInput(e.target.value)}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl p-4 text-lg font-bold outline-none focus:ring-2 focus:ring-gray-500"
-                    placeholder="새 비밀번호 다시 입력"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 focus:ring-2 focus:ring-green-500 outline-none"
+                    placeholder="새 비밀번호 재입력"
                   />
                 </div>
                 <button
-                  onClick={async () => {
-                    if (!newPwdInput) return alert('변경할 비밀번호를 입력해주세요.');
-                    if (newPwdInput !== confirmPwdInput) return alert('새 비밀번호가 일치하지 않습니다.');
-                    try {
-                      setLoading(true);
-                      await setDoc(doc(db, 'config', 'admin'), { password: newPwdInput }, { merge: true });
-                      setNewPwdInput('');
-                      setConfirmPwdInput('');
-                      showSuccess('비밀번호가 변경되었습니다!');
-                    } catch(e) {
-                      console.error("Password update error:", e);
-                      alert('비밀번호 변경 중 오류가 발생했습니다.');
-                    } finally {
-                      setLoading(false);
-                    }
-                  }}
-                  className="w-full mt-6 bg-gray-800 text-white text-lg font-bold py-4 rounded-xl hover:bg-gray-900 active:scale-95 transition-transform"
+                  onClick={handleChangePassword}
+                  className="w-full bg-gray-800 hover:bg-gray-900 text-white font-bold py-3 rounded-xl mt-4 transition-colors"
                 >
-                  변경하기
+                  비밀번호 변경 저장
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* --- ADMIN EQUIPMENTS --- */}
-        {view === 'admin_equipments' && (
-          <div className="p-4 md:p-6 space-y-6">
-            <div className="bg-white p-5 md:p-8 rounded-2xl shadow-sm border border-gray-100">
-              <h3 className="font-bold text-gray-800 mb-4 flex items-center text-lg md:text-xl"><PlusCircle size={22} className="mr-2 text-blue-500"/> 새 물품 추가</h3>
-              <div className="space-y-4">
-                <div className="flex space-x-4">
-                  <label className="w-20 h-20 md:w-24 md:h-24 bg-gray-50 border border-gray-200 rounded-xl flex items-center justify-center cursor-pointer hover:bg-gray-100 transition-colors shrink-0 overflow-hidden relative">
-                    <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
-                    {newEqImage ? (
-                      <img src={newEqImage} alt="Preview" className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="flex flex-col items-center">
-                        <Camera size={28} className="text-gray-400" />
-                        <span className="text-xs md:text-sm text-gray-400 mt-1 font-bold">사진</span>
-                      </div>
-                    )}
-                  </label>
-                  <input type="text" placeholder="물품명 (예: 배드민턴 채)" value={newEqName} onChange={e => setNewEqName(e.target.value)} className="flex-1 bg-gray-50 border border-gray-200 rounded-xl p-4 text-lg md:text-xl font-bold outline-none focus:ring-2 focus:ring-blue-500" />
-                </div>
-                <div className="flex items-center space-x-4">
-                  <label className="flex-1 text-sm md:text-base font-medium text-gray-600">총 보유 수량</label>
-                  <input type="number" min="1" value={newEqQty} onChange={e => setNewEqQty(e.target.value)} className="w-28 bg-gray-50 border border-gray-200 rounded-xl p-3 text-lg text-center font-bold outline-none focus:ring-2 focus:ring-blue-500" />
-                </div>
-                <label className="flex items-center space-x-3 text-sm md:text-base text-gray-600 pt-2">
-                  <input type="checkbox" checked={newEqTracked} onChange={e => setNewEqTracked(e.target.checked)} className="w-6 h-6 rounded text-blue-500" />
-                  <span>수량 선택 기능 켜기 (체크 해제 시 1개 고정)</span>
-                </label>
-                <button onClick={handleAddEquipment} className="w-full mt-6 bg-blue-500 text-white text-lg font-bold py-4 rounded-xl hover:bg-blue-600 active:scale-95 transition-transform">추가하기</button>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <h3 className="font-bold text-gray-800 px-1 text-lg">등록된 물품 목록</h3>
-              {equipments.map(eq => (
-                <div key={eq.id} className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
-                    <div className="w-16 h-16 md:w-20 md:h-20 flex items-center justify-center text-5xl md:text-6xl shrink-0">
-                      {renderIcon(eq.imageUrl, eq.name)}
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-lg text-gray-800">{eq.name}</h4>
-                      <p className="text-sm text-gray-500">총 {eq.totalQuantity}개 {eq.isQuantityTracked ? '' : '(수량 입력 없음)'}</p>
-                    </div>
-                  </div>
-                  <button onClick={() => handleDeleteEquipment(eq.id)} className="p-3 text-red-400 hover:bg-red-50 rounded-lg transition-colors">
-                    <Trash2 size={24} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* --- ADMIN HISTORY --- */}
-        {view === 'admin_history' && (
-          <div className="p-4 md:p-6 space-y-3 md:space-y-4">
-            <p className="text-sm md:text-base font-medium text-gray-500 mb-4 px-1">모든 대여 및 반납 기록입니다.</p>
-            {transactions.slice().sort((a,b) => b.timestamp - a.timestamp).map(tx => {
-              const eq = equipments.find(e => e.id === tx.equipmentId);
-              const isReturned = tx.status === 'returned';
-              const dateStr = tx.timestamp?.toDate ? new Intl.DateTimeFormat('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(tx.timestamp.toDate()) : '';
-
-              return (
-                <div key={tx.id} className={`p-4 md:p-6 rounded-2xl border ${isReturned ? 'bg-gray-50 border-gray-200 opacity-70' : 'bg-white border-green-200 shadow-sm'}`}>
-                  <div className="flex justify-between items-start mb-3">
-                    <span className={`text-xs md:text-sm font-bold px-2 py-1 rounded-md ${isReturned ? 'bg-gray-200 text-gray-600' : 'bg-green-100 text-green-700'}`}>
-                      {isReturned ? '반납완료' : '대여중'}
-                    </span>
-                    <span className="text-sm text-gray-400">{dateStr}</span>
-                  </div>
-                  <div className="flex items-center">
-                    <div className="w-14 h-14 md:w-16 md:h-16 mr-4 flex items-center justify-center text-4xl md:text-5xl shrink-0">
-                      {renderIcon(eq?.imageUrl, eq?.name)}
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-lg md:text-xl text-gray-800">{eq?.name || '삭제된 물품'} <span className="text-gray-500 font-normal">x{tx.borrowedQuantity}</span></h4>
-                      <p className="text-sm md:text-base text-gray-600 flex items-center mt-1"><User size={16} className="mr-1"/> {tx.borrowerName}</p>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* --- SUCCESS OVERLAY --- */}
-        {view === 'success' && (
-          <div className="absolute inset-0 bg-white z-50 flex flex-col items-center justify-center animate-in fade-in duration-300">
-            <div className="bg-green-100 p-6 rounded-full mb-6">
-              <CheckCircle2 size={80} className="text-green-500" />
-            </div>
-            <h2 className="text-3xl font-extrabold text-gray-800">{successMessage}</h2>
-            <p className="text-gray-500 mt-2 font-medium">메인 화면으로 돌아갑니다...</p>
-          </div>
-        )}
-
       </main>
+
+      {/* --- CUSTOM MODALS --- */}
+      {alertState.show && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl text-center">
+            <h3 className="text-xl font-bold text-gray-800 mb-2">알림</h3>
+            <p className="text-gray-600 mb-6">{alertState.message}</p>
+            <button
+              onClick={() => setAlertState({ show: false, message: '' })}
+              className="w-full bg-green-500 text-white font-bold py-3.5 rounded-xl hover:bg-green-600 active:scale-95 transition-all"
+            >
+              확인
+            </button>
+          </div>
+        </div>
+      )}
+
+      {confirmState.show && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl text-center">
+            <h3 className="text-xl font-bold text-gray-800 mb-2">확인</h3>
+            <p className="text-gray-600 mb-6">{confirmState.message}</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmState({ show: false, message: '', onConfirm: null })}
+                className="flex-1 bg-gray-200 text-gray-800 font-bold py-3.5 rounded-xl hover:bg-gray-300 active:scale-95 transition-all"
+              >
+                취소
+              </button>
+              <button
+                onClick={() => {
+                  confirmState.onConfirm();
+                  setConfirmState({ show: false, message: '', onConfirm: null });
+                }}
+                className="flex-1 bg-red-500 text-white font-bold py-3.5 rounded-xl hover:bg-red-600 active:scale-95 transition-all"
+              >
+                삭제
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- TOAST MESSAGE --- */}
+      {toastMsg && (
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50 transition-all duration-300">
+          <div className="bg-gray-800/90 backdrop-blur-sm text-white px-6 py-3 rounded-full shadow-2xl font-bold flex items-center">
+            <Check size={18} className="mr-2 text-green-400" strokeWidth={3} />
+            {toastMsg}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
